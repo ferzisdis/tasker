@@ -1,6 +1,6 @@
 use arboard::Clipboard;
 use crossterm::event::{
-    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use tui_textarea::{CursorMove, TextArea};
 
@@ -20,6 +20,14 @@ pub enum Action {
 }
 
 pub fn handle_event(event: Event, app: &mut App, textarea: &mut TextArea) -> Action {
+    // On Windows, crossterm reports both Press and Release for each keystroke.
+    // Acting on Release too would double-execute every key, so ignore non-Press.
+    if let Event::Key(KeyEvent { kind, .. }) = &event {
+        if *kind != KeyEventKind::Press {
+            return Action::None;
+        }
+    }
+
     match app.mode {
         Mode::Normal => handle_normal(event, app),
         Mode::Add | Mode::Edit => handle_editor(event, app, textarea),
@@ -147,15 +155,17 @@ fn handle_editor(event: Event, app: &App, textarea: &mut TextArea) -> Action {
             return Action::Save;
         }
 
-        // paste: Cmd/Ctrl + V (also м for Russian layout)
-        if ctrl_or_cmd && matches!(code, KeyCode::Char('v') | KeyCode::Char('м')) {
-            textarea.insert_str(&smart_paste());
-            return Action::None;
-        }
-
         if *code == KeyCode::Esc {
             return Action::Cancel;
         }
+    }
+
+    // Paste arrives as a bracketed-paste event (terminal's own paste shortcut,
+    // right-click, etc.). Re-read the clipboard via arboard so HTML links survive;
+    // fall back to the event's plain-text payload if that fails.
+    if let Event::Paste(pasted) = &event {
+        textarea.insert_str(&smart_paste(pasted));
+        return Action::None;
     }
 
     // Mouse clicks: move cursor to clicked position, don't pass to textarea.input
@@ -237,10 +247,10 @@ fn editor_click_to_cursor(
     Some((last_line, last_col))
 }
 
-fn smart_paste() -> String {
+fn smart_paste(fallback: &str) -> String {
     let mut clipboard = match Clipboard::new() {
         Ok(c) => c,
-        Err(_) => return String::new(),
+        Err(_) => return fallback.to_string(),
     };
 
     // Browsers set both text/html and text/plain when copying from a web page.
@@ -255,5 +265,8 @@ fn smart_paste() -> String {
         }
     }
 
-    clipboard.get_text().unwrap_or_default()
+    match clipboard.get_text() {
+        Ok(text) if !text.is_empty() => text,
+        _ => fallback.to_string(),
+    }
 }
