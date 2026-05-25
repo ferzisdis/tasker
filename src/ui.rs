@@ -5,14 +5,14 @@ use ratatui::{
     text::{Line, Span},
     widgets::{
         Block, BorderType, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, Wrap,
+        ScrollbarState,
     },
 };
 use tui_textarea::TextArea;
 
 use crate::{
     app::{App, Mode},
-    links::render_with_footnotes,
+    links::{RenderedText, render_with_footnotes},
 };
 
 const LINK_PALETTE: [(u8, u8, u8); 6] = [
@@ -44,6 +44,7 @@ pub fn draw(f: &mut Frame, app: &mut App, textarea: Option<&TextArea>) {
 
 fn draw_task_list(f: &mut Frame, app: &mut App, area: Rect) {
     app.card_rows.clear();
+    app.link_rects.clear();
 
     let indices = app.visible_indices();
 
@@ -69,29 +70,21 @@ fn draw_task_list(f: &mut Frame, app: &mut App, area: Rect) {
     // inner width inside card borders
     let inner_w = list_area.width.saturating_sub(2);
     let today = chrono::Local::now().date_naive();
+    let is_trash = app.mode == Mode::Trash;
 
     let rendered_tasks: Vec<_> = indices
         .iter()
         .map(|&i| render_with_footnotes(&app.tasks[i].text))
         .collect();
 
-    let card_heights: Vec<u16> = rendered_tasks
+    // Lay out each card into explicit visual rows (manual char wrapping) so click
+    // hit-testing of links matches the render exactly.
+    let card_layouts: Vec<Vec<VisualRow>> = rendered_tasks
         .iter()
-        .map(|r| {
-            let text_rows: u16 = r
-                .display
-                .lines()
-                .map(|l| wrapped_rows(l, inner_w))
-                .sum::<u16>()
-                .max(1);
-            let fn_rows: u16 = r
-                .footnotes
-                .iter()
-                .map(|(n, txt, url)| wrapped_rows(&format!("[{}] {}: {}", n, txt, url), inner_w))
-                .sum();
-            2 + text_rows + fn_rows
-        })
+        .map(|r| layout_card(r, inner_w as usize, is_trash))
         .collect();
+
+    let card_heights: Vec<u16> = card_layouts.iter().map(|l| l.len() as u16 + 2).collect();
 
     let total_height: u16 = card_heights.iter().sum();
 
@@ -116,7 +109,6 @@ fn draw_task_list(f: &mut Frame, app: &mut App, area: Rect) {
 
     app.card_rows.clear();
 
-    let is_trash = app.mode == Mode::Trash;
     let mut scrolled_y: i32 = -(offset_y as i32);
 
     for (vis_i, &task_i) in indices.iter().enumerate() {
@@ -185,7 +177,6 @@ fn draw_task_list(f: &mut Frame, app: &mut App, area: Rect) {
             Color::Reset
         };
 
-        let rendered = &rendered_tasks[vis_i];
         let title_line = Line::from(vec![Span::raw(" "), Span::styled(date_str, date_style)]);
 
         let block = Block::default()
@@ -194,34 +185,30 @@ fn draw_task_list(f: &mut Frame, app: &mut App, area: Rect) {
             .border_style(Style::default().fg(border_color))
             .title_top(title_line);
 
-        let mut lines: Vec<Line> = Vec::new();
-        for l in rendered.display.lines() {
-            if is_trash {
-                lines.push(Line::from(Span::styled(
-                    l.to_string(),
-                    Style::default().fg(Color::DarkGray),
-                )));
-            } else {
-                lines.push(build_display_line(l, &rendered.footnotes));
+        let layout = &card_layouts[vis_i];
+        let lines: Vec<Line> = layout.iter().map(|vr| vr.line.clone()).collect();
+        let paragraph = Paragraph::new(lines).block(block);
+        f.render_widget(paragraph, card_rect);
+
+        // Register clickable link rects (terminal coords) for the visible rows.
+        // Content sits one cell inside the border; Paragraph draws rows top-down.
+        let content_x = card_rect.x + 1;
+        let content_y = card_rect.y + 1;
+        let content_rows = render_h.saturating_sub(2);
+        let max_x = content_x + inner_w;
+        for (ri, vr) in layout.iter().enumerate() {
+            if ri as u16 >= content_rows {
+                break;
+            }
+            let y = content_y + ri as u16;
+            for (cs, ce, url) in &vr.links {
+                let x_start = content_x + cs;
+                let x_end = (content_x + ce).min(max_x);
+                if x_start < x_end {
+                    app.link_rects.push((y, x_start, x_end, url.clone()));
+                }
             }
         }
-        for (n, link_text, url) in &rendered.footnotes {
-            let c = if is_trash {
-                Color::DarkGray
-            } else {
-                let (r, g, b) = LINK_PALETTE[(n - 1) % LINK_PALETTE.len()];
-                Color::Rgb(r, g, b)
-            };
-            lines.push(Line::from(vec![
-                Span::styled(format!("[{}] ", n), Style::default().fg(c)),
-                Span::styled(format!("{}: {}", link_text, url), Style::default().fg(c)),
-            ]));
-        }
-
-        let paragraph = Paragraph::new(lines)
-            .block(block)
-            .wrap(Wrap { trim: false });
-        f.render_widget(paragraph, card_rect);
 
         scrolled_y += card_h as i32;
     }
@@ -238,48 +225,168 @@ fn draw_task_list(f: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn wrapped_rows(line: &str, width: u16) -> u16 {
-    if width == 0 {
-        return 1;
-    }
-    let len = line.chars().count() as u16;
-    if len == 0 { 1 } else { (len + width - 1) / width }
+struct VisualRow {
+    line: Line<'static>,
+    /// (col_start, col_end, url) clickable spans within the content area (col 0 = first content cell)
+    links: Vec<(u16, u16, String)>,
 }
 
-fn build_display_line<'a>(line: &'a str, footnotes: &[(usize, String, String)]) -> Line<'a> {
-    if footnotes.is_empty() {
-        return Line::from(line);
-    }
-    let mut spans: Vec<Span> = Vec::new();
-    let mut rest = line;
-    while !rest.is_empty() {
-        if let Some(pos) = rest.find('[') {
-            if pos > 0 {
-                spans.push(Span::raw(&rest[..pos]));
+fn palette(seq: usize) -> Color {
+    let (r, g, b) = LINK_PALETTE[seq % LINK_PALETTE.len()];
+    Color::Rgb(r, g, b)
+}
+
+/// Lay a card out into explicit visual rows using manual char-based wrapping, so the
+/// rendered geometry is deterministic and matches click hit-testing.
+fn layout_card(rendered: &RenderedText, inner_w: usize, is_trash: bool) -> Vec<VisualRow> {
+    let w = inner_w.max(1);
+    let mut rows: Vec<VisualRow> = Vec::new();
+
+    // Footnote color by number n (n -> shared palette index).
+    let fc: Vec<usize> = rendered.footnotes.iter().map(|(_, _, _, c)| *c).collect();
+
+    let display_lines: Vec<&str> = rendered.display.split('\n').collect();
+    for (li, dline) in display_lines.iter().enumerate() {
+        let chars: Vec<char> = dline.chars().collect();
+        let n = chars.len();
+
+        // Per-char style. Plain text stays default (white); only links/markers get color.
+        let mut styles = vec![Style::default(); n];
+        if is_trash {
+            for s in styles.iter_mut() {
+                *s = Style::default().fg(Color::DarkGray);
             }
-            rest = &rest[pos..];
-            if let Some(end) = rest[1..].find(']') {
-                let marker = &rest[..end + 2];
-                if let Ok(n) = rest[1..end + 1].parse::<usize>() {
-                    let (r, g, b) = LINK_PALETTE[(n - 1) % LINK_PALETTE.len()];
-                    spans.push(Span::styled(
-                        marker.to_string(),
-                        Style::default()
-                            .fg(Color::Rgb(r, g, b))
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                    rest = &rest[end + 2..];
-                    continue;
+        } else {
+            // Bare URLs: colored, no underline. (markdown inline text stays white.)
+            for il in rendered.inline.iter().filter(|il| il.line == li && il.is_bare) {
+                let st = Style::default().fg(palette(il.color));
+                for p in il.col_start..il.col_end.min(n) {
+                    styles[p] = st;
                 }
             }
-            spans.push(Span::raw(&rest[..1]));
-            rest = &rest[1..];
-        } else {
-            spans.push(Span::raw(rest));
-            break;
+            // `[n]` markers: bold, in the link's shared color.
+            for (s, e, num) in marker_spans(dline) {
+                let color = fc.get(num.saturating_sub(1)).copied().unwrap_or(0);
+                let st = Style::default().fg(palette(color)).add_modifier(Modifier::BOLD);
+                for p in s..e.min(n) {
+                    styles[p] = st;
+                }
+            }
         }
+
+        // Clickable rects: every inline link on this line (markdown text + bare URLs).
+        let links: Vec<(usize, usize, String)> = rendered
+            .inline
+            .iter()
+            .filter(|il| il.line == li)
+            .map(|il| (il.col_start, il.col_end, il.url.clone()))
+            .collect();
+
+        emit_rows(&chars, &styles, &links, w, &mut rows);
     }
-    Line::from(spans)
+
+    // Footnotes: color only `[n]` and the URL; the link text in between stays white.
+    for (num, text, url, color) in &rendered.footnotes {
+        let full = format!("[{}] {}: {}", num, text, url);
+        let chars: Vec<char> = full.chars().collect();
+        let n = chars.len();
+        let marker_len = format!("[{}]", num).chars().count();
+        let url_start = n.saturating_sub(url.chars().count());
+
+        let mut styles = vec![Style::default(); n];
+        if is_trash {
+            for s in styles.iter_mut() {
+                *s = Style::default().fg(Color::DarkGray);
+            }
+        } else {
+            let c = palette(*color);
+            for p in 0..marker_len.min(n) {
+                styles[p] = Style::default().fg(c);
+            }
+            for p in url_start..n {
+                styles[p] = Style::default().fg(c);
+            }
+        }
+
+        let links = vec![(0usize, n, url.clone())];
+        emit_rows(&chars, &styles, &links, w, &mut rows);
+    }
+
+    rows
+}
+
+/// Wrap a logical line (chars + per-char styles + clickable char ranges) into visual rows
+/// of `w` columns, producing styled `Line`s and content-relative link rects.
+fn emit_rows(
+    chars: &[char],
+    styles: &[Style],
+    links: &[(usize, usize, String)],
+    w: usize,
+    out: &mut Vec<VisualRow>,
+) {
+    let n = chars.len();
+    let nrows = if n == 0 { 1 } else { (n + w - 1) / w };
+    for ci in 0..nrows {
+        let base = ci * w;
+        let end = (base + w).min(n);
+
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let mut cur = String::new();
+        let mut cur_style: Option<Style> = None;
+        for pos in base..end {
+            let st = styles[pos];
+            if cur_style != Some(st) {
+                if !cur.is_empty() {
+                    spans.push(Span::styled(std::mem::take(&mut cur), cur_style.unwrap()));
+                }
+                cur_style = Some(st);
+            }
+            cur.push(chars[pos]);
+        }
+        if !cur.is_empty() {
+            spans.push(Span::styled(cur, cur_style.unwrap_or_default()));
+        }
+        let line = if spans.is_empty() {
+            Line::from(String::new())
+        } else {
+            Line::from(spans)
+        };
+
+        let mut rects = Vec::new();
+        for (s, e, url) in links {
+            let cs = (*s).max(base);
+            let ce = (*e).min(end);
+            if cs < ce {
+                rects.push(((cs - base) as u16, (ce - base) as u16, url.clone()));
+            }
+        }
+
+        out.push(VisualRow { line, links: rects });
+    }
+}
+
+/// Char ranges of `[n]` footnote markers within a line: (char_start, char_end_excl, n).
+fn marker_spans(line: &str) -> Vec<(usize, usize, usize)> {
+    let chars: Vec<char> = line.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '[' {
+            if let Some(rel) = chars[i + 1..].iter().position(|&c| c == ']') {
+                let close = i + 1 + rel;
+                let inner: String = chars[i + 1..close].iter().collect();
+                if !inner.is_empty() && inner.chars().all(|c| c.is_ascii_digit()) {
+                    if let Ok(n) = inner.parse::<usize>() {
+                        out.push((i, close + 1, n));
+                        i = close + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    out
 }
 
 /// Adjust `current` offset only enough to keep the selected card fully visible.

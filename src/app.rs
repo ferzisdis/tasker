@@ -28,6 +28,8 @@ pub struct App {
     pub next_id: u64,
     /// (start_row, end_row) per visible task in terminal coordinates; rebuilt every frame
     pub card_rows: Vec<(u16, u16)>,
+    /// (row, col_start, col_end, url) clickable link rects in terminal coords; rebuilt every frame
+    pub link_rects: Vec<(u16, u16, u16, String)>,
     /// set true to snap scroll + cursor to last item on next draw
     pub needs_scroll_to_bottom: bool,
     /// editor popup geometry: (x, y, width, height); set each frame by draw_editor
@@ -48,6 +50,7 @@ impl App {
             mode: Mode::Normal,
             next_id,
             card_rows: Vec::new(),
+            link_rects: Vec::new(),
             needs_scroll_to_bottom: true,
             editor_popup: None,
             editor_vscroll: 0,
