@@ -75,10 +75,17 @@ fn handle_normal(event: Event, app: &mut App) -> Action {
             KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('о') => app.move_down(),
             _ => {}
         },
-        Event::Mouse(MouseEvent { kind, row, .. }) => match kind {
+        Event::Mouse(MouseEvent { kind, column, row, .. }) => match kind {
             MouseEventKind::ScrollUp => app.move_up(),
             MouseEventKind::ScrollDown => app.move_down(),
             MouseEventKind::Down(MouseButton::Left) => {
+                // Link hit-test takes priority over card selection.
+                for (ly, xs, xe, url) in &app.link_rects {
+                    if row == *ly && column >= *xs && column < *xe {
+                        open_url(url);
+                        return Action::None;
+                    }
+                }
                 for (i, &(start, end)) in app.card_rows.iter().enumerate() {
                     if start < end && row >= start && row < end {
                         app.selected = i;
@@ -127,10 +134,17 @@ fn handle_trash(event: Event, app: &mut App) -> Action {
             KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('о') => app.move_down(),
             _ => {}
         },
-        Event::Mouse(MouseEvent { kind, row, .. }) => match kind {
+        Event::Mouse(MouseEvent { kind, column, row, .. }) => match kind {
             MouseEventKind::ScrollUp => app.move_up(),
             MouseEventKind::ScrollDown => app.move_down(),
             MouseEventKind::Down(MouseButton::Left) => {
+                // Link hit-test takes priority over card selection.
+                for (ly, xs, xe, url) in &app.link_rects {
+                    if row == *ly && column >= *xs && column < *xe {
+                        open_url(url);
+                        return Action::None;
+                    }
+                }
                 for (i, &(start, end)) in app.card_rows.iter().enumerate() {
                     if start < end && row >= start && row < end {
                         app.selected = i;
@@ -245,6 +259,22 @@ fn editor_click_to_cursor(
     let last_line = lines.len().saturating_sub(1) as u16;
     let last_col = lines.last().map(|l| l.as_ref().chars().count()).unwrap_or(0) as u16;
     Some((last_line, last_col))
+}
+
+fn open_url(url: &str) {
+    // Only http(s): both a UX guard and protection against shell injection
+    // (notably the Windows `start` builtin). URL is passed as a separate arg.
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(target_os = "windows")]
+    let _ = std::process::Command::new("cmd")
+        .args(["/C", "start", "", url])
+        .spawn();
+    #[cfg(target_os = "linux")]
+    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
 }
 
 fn smart_paste(fallback: &str) -> String {
