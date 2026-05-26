@@ -9,6 +9,8 @@ pub struct Task {
     pub created_at: NaiveDate,
     #[serde(default)]
     pub deleted: bool,
+    #[serde(default)]
+    pub deleted_at: Option<NaiveDate>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,6 +88,7 @@ impl App {
             in_progress: false,
             created_at: chrono::Local::now().date_naive(),
             deleted: false,
+            deleted_at: None,
         };
         self.next_id += 1;
         self.tasks.push(task);
@@ -98,6 +101,7 @@ impl App {
         let indices = self.visible_indices();
         if let Some(&task_i) = indices.get(vis_index) {
             self.tasks[task_i].deleted = true;
+            self.tasks[task_i].deleted_at = Some(chrono::Local::now().date_naive());
         }
         self.clamp_selected();
     }

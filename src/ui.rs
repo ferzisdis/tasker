@@ -29,11 +29,12 @@ pub fn draw(f: &mut Frame, app: &mut App, textarea: Option<&TextArea>) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .constraints([Constraint::Length(1), Constraint::Min(1), Constraint::Length(1)])
         .split(size);
 
-    draw_task_list(f, app, chunks[0]);
-    draw_hints(f, app, chunks[1]);
+    draw_header(f, app, chunks[0]);
+    draw_task_list(f, app, chunks[1]);
+    draw_hints(f, app, chunks[2]);
 
     if app.mode == Mode::Add || app.mode == Mode::Edit {
         if let Some(ta) = textarea {
@@ -173,8 +174,10 @@ fn draw_task_list(f: &mut Frame, app: &mut App, area: Rect) {
             if is_selected { Color::Gray } else { Color::DarkGray }
         } else if is_selected {
             Color::Rgb(255, 165, 0)
+        } else if task.in_progress {
+            Color::Rgb(100, 150, 200)
         } else {
-            Color::Reset
+            Color::DarkGray
         };
 
         let title_line = Line::from(vec![Span::raw(" "), Span::styled(date_str, date_style)]);
@@ -413,6 +416,24 @@ fn clamp_scroll_to_selected(
     };
 
     adjusted.min(max_offset)
+}
+
+fn draw_header(f: &mut Frame, app: &App, area: Rect) {
+    let today = chrono::Local::now().date_naive();
+    let active: usize = app.tasks.iter().filter(|t| !t.deleted).count();
+    let in_progress: usize = app.tasks.iter().filter(|t| !t.deleted && t.in_progress).count();
+    let closed_today: usize = app
+        .tasks
+        .iter()
+        .filter(|t| t.deleted && t.deleted_at == Some(today))
+        .count();
+
+    let text = format!(
+        " Tasker   Всего: {}   В процессе: {}   Закрыто сегодня: {}",
+        active, in_progress, closed_today
+    );
+    let p = Paragraph::new(text).style(Style::default().fg(Color::DarkGray));
+    f.render_widget(p, area);
 }
 
 fn draw_hints(f: &mut Frame, app: &App, area: Rect) {

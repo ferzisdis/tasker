@@ -4,48 +4,63 @@
     "text": "Migrate CI pipeline to GitHub Actions\n\nSee [migration guide](https://docs.github.com/en/actions/migrating-to-github-actions) and [workflow syntax reference](https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions).",
     "in_progress": false,
     "created_at": "2026-03-10",
-    "deleted": false
+    "deleted": false,
+    "deleted_at": null
   },
   {
     "id": 2,
     "text": "Implement JWT refresh token rotation\n\nTrack in [issue #241](https://github.com/ferzisdis/backend/issues/241). Spec: [OAuth 2.0 RFC §6](https://datatracker.ietf.org/doc/html/rfc6749#section-6).",
     "in_progress": false,
     "created_at": "2026-04-02",
-    "deleted": false
+    "deleted": false,
+    "deleted_at": null
   },
   {
     "id": 3,
     "text": "Set up Sentry error tracking for production\n\nDocs: [Sentry Rust SDK](https://docs.sentry.io/platforms/rust/).",
     "in_progress": true,
     "created_at": "2026-05-01",
-    "deleted": false
+    "deleted": false,
+    "deleted_at": null
   },
   {
     "id": 4,
     "text": "Investigate memory leak in WebSocket handler\n\nPossibly related to [tokio issue #6434](https://github.com/tokio-rs/tokio/issues/6434). Repro steps in [internal wiki](https://notion.so/team/ws-leak-repro).",
-    "in_progress": true,
+    "in_progress": false,
     "created_at": "2026-05-09",
-    "deleted": false
+    "deleted": false,
+    "deleted_at": null
   },
   {
     "id": 5,
     "text": "Review PR: add cursor-based pagination to /api/tasks",
     "in_progress": false,
     "created_at": "2026-05-17",
-    "deleted": false
+    "deleted": false,
+    "deleted_at": null
   },
   {
     "id": 6,
     "text": "Write integration tests for storage module",
     "in_progress": true,
     "created_at": "2026-05-20",
-    "deleted": false
+    "deleted": false,
+    "deleted_at": null
   },
   {
     "id": 7,
     "text": "Update all dependencies to latest stable\n\ncargo update && cargo audit",
     "in_progress": false,
     "created_at": "2026-05-22",
-    "deleted": false
+    "deleted": false,
+    "deleted_at": null
+  },
+  {
+    "id": 8,
+    "text": "This is the [modern workplace](https://www.apa.org/news/podcasts/speaking-of-psychology/attention-spans). González &amp; Mark measured activity switches every 3 minutes. Microsoft reports λ = 30 for heavy collaborators. These researchers are describing millions of people’s actual working conditions. And at these parameters, the math is unambiguous: deep work is statistically near-impossible. Link: https://www.apa.org/news/podcasts/speaking-of-psychology",
+    "in_progress": false,
+    "created_at": "2026-05-25",
+    "deleted": true,
+    "deleted_at": "2026-05-26"
   }
 ]
